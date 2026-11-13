@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live RFID Attendance & Access Log</title>
+    <script src="https://tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cloudflare.com">
+    <style>
+        @keyframes pulse-ring {
+            0% { transform: scale(0.33); opacity: 1; }
+            80%, 100% { opacity: 0; }
+        }
+        .live-pulse { position: relative; }
+        .live-pulse::before {
+            content: ''; position: absolute; left: -8px; top: 6px;
+            width: 10px; height: 10px; background-color: #22c55e;
+            border-radius: 50%; display: block;
+            animation: pulse-ring 1.25s cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen">
+
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-800 pb-6 mb-8 gap-4">
+            <div>
+                <h1 class="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
+                    ESP32 RFID Management Hub
+                </h1>
+                <p class="text-slate-400 mt-1">IT Expo Live Monitoring Dashboard</p>
+            </div>
+            <div class="flex items-center gap-3 bg-slate-800/50 px-4 py-2 rounded-xl border border-slate-700/50">
+                <span class="live-pulse pl-4 text-sm font-semibold text-emerald-400">System Live</span>
+                <span id="last-updated" class="text-xs text-slate-400 ml-2">Syncing...</span>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-slate-800/40 border border-slate-700/60 p-6 rounded-2xl shadow-xl">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-slate-400 font-medium text-sm">Total Card Scans</h3>
+                    <div class="p-2 bg-blue-500/10 rounded-lg text-blue-400"><i class="fa-solid fa-id-card text-xl"></i></div>
+                </div>
+                <p id="total-scans" class="text-4xl font-bold">0</p>
+            </div>
+            <div class="bg-slate-800/40 border border-slate-700/60 p-6 rounded-2xl shadow-xl md:col-span-2">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-slate-400 font-medium text-sm">Most Recent Scan Activity</h3>
+                    <span class="text-xs bg-emerald-500/10 text-emerald-400 font-medium px-2 py-0.5 rounded-full">New</span>
+                </div>
+                <div id="latest-scan-container" class="flex items-center gap-4 py-1">
+                    <div class="text-slate-500 text-sm">Waiting for live data transmission...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-slate-800/40 border border-slate-700/60 rounded-2xl shadow-xl overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-700/60 flex justify-between items-center">
+                <h2 class="text-lg font-semibold">Live Transmission History Log</h2>
+                <button onclick="fetchSheetData()" class="text-sm bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg border border-slate-600 transition">
+                    <i class="fa-solid fa-rotate-right mr-1.5"></i>Force Refresh
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-800/60 text-slate-400 text-xs font-semibold uppercase tracking-wider border-b border-slate-700/60">
+                            <th class="px-6 py-3">Date and Time</th>
+                            <th class="px-6 py-3">RFID UID</th>
+                            <th class="px-6 py-3">Student Name</th>
+                        </tr>
+                    </thead>
+                    <tbody id="data-rows" class="divide-y divide-slate-800">
+                        <tr>
+                            <td colspan="3" class="px-6 py-12 text-center text-slate-500">Connecting to live hardware database...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTJOKWkTZT51lq_CieMkR7gwqRPi7f9aKiXBhSG8znn0HciErptcgSKfM5sJnAT4jGN6cZlKRUWLZOB/pub?gid=0&single=true&output=csv";
+
+        async function fetchSheetData() {
+            try {
+                const response = await fetch(CSV_URL + '&t=' + new Date().getTime());
+                const text = await response.text();
+                
+                // Parse CSV text line-by-line
+                const rows = text.split('\n')
+                    .map(row => row.split(',').map(cell => cell.trim().replace(/^"|"$/g, '')))
+                    .filter(row => row.length >= 3 && row.some(cell => cell !== ''));
+
+                if(rows.length <= 1) return;
+
+                // Slice off headers, reverse so newest scan shows first
+                const data = rows.slice(1).reverse();
+
+                document.getElementById('total-scans').innerText = data.length;
+                document.getElementById('last-updated').innerText = `Sync: ${new Date().toLocaleTimeString()}`;
+
+                // Map elements to match your columns exactly:
+                // row[0] = RFID UID, row[1] = Student Name, row[2] = Date and Time
+                const latest = data[0];
+                const latestUID = latest[0] || 'Unknown';
+                const latestUser = latest[1] || 'Unregistered Tag';
+                const latestTime = latest[2] || 'N/A';
+
+                document.getElementById('latest-scan-container').innerHTML = `
+                    <div class="h-12 w-12 bg-emerald-500/10 text-emerald-400 rounded-xl flex items-center justify-center font-bold text-lg border border-emerald-500/20 shadow-inner">
+                        <i class="fa-solid fa-user-check"></i>
+                    </div>
+                    <div>
+                        <div class="text-xl font-bold tracking-wide">${latestUser}</div>
+                        <div class="text-sm text-slate-400 font-mono">UID: ${latestUID} &bull; <span class="text-slate-500">${latestTime}</span></div>
+                    </div>
+                `;
+
+                const tbody = document.getElementById('data-rows');
+                tbody.innerHTML = '';
+                
+                data.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-slate-800/30 transition-colors";
+                    tr.innerHTML = `
+                        <td class="px-6 py-4 text-sm text-slate-300 font-mono">${row[2] || '—'}</td>
+                        <td class="px-6 py-4 text-sm"><span class="bg-slate-800 px-2 py-1 rounded font-mono text-blue-400 border border-slate-700/50">${row[0] || '—'}</span></td>
+                        <td class="px-6 py-4 text-sm font-semibold text-emerald-400">${row[1] || 'Authorized Access'}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+            } catch (error) {
+                console.error("Data ingestion failure:", error);
+            }
+        }
+
+        fetchSheetData();
+        setInterval(fetchSheetData, 3000); // Polls Google Sheets CSV engine every 3 seconds
+    </script>
+</body>
+</html>
